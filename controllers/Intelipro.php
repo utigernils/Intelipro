@@ -1,114 +1,77 @@
 <?php
 require_once 'utils/response.php';
+require_once 'utils/deepseek.php';
 
-class consoleController {
-
-    private $session;
-    private $consoleModell; 
+class Intelipro
+{
+    private $projectModell;
     private $response;
 
-    public function __construct($session, $dataModell) {
-        $this->session = $session;
-        $this->consoleModell = $dataModell;
+    private $deepseek;
+
+    public function __construct($dataModell, $deepseekKey)
+    {
+        $this->projectModell = $dataModell;
         $this->response = new Response();
+
+        $this->deepseek = new deepseek($deepseekKey);
     }
 
-    public function getConsole($consoleId) {
-        $console = $this->consoleModell->get($consoleId);
+    public function handleQuery()
+    {
+        $query = json_decode(file_get_contents('php://input'), true)['query'] ?? null;
 
-        if ($console === false) {
-            $this->response->error(message:'Your request was blocked due to invalid credentials');
-        }
-        
-        if (!empty($console)) {
-            $this->response->setHeader(200);
-
-            $response = json_encode($console[0]);
-            echo $response;
+        if (is_null($query)) {
+            $this->response->error(message: 'Request does not contain query', responseCode: 400);
             exit();
-
-        } else {
-            $this->response->error(message:'Console not found', responseCode:404);
-        }
-    }
-
-    public function updateConsole($consoleId) {
-        $console = $this->consoleModell->get($consoleId);
-
-        if (empty($console)) {
-            $this->response->error(message:'Console not found', responseCode:404);
         }
 
-        $jsonData = json_decode(file_get_contents('php://input'), true);
+        $projects = array_map(function ($project) {
+            return [$project['id'], $project['title']];
+        }, $this->projectModell->get());
 
-        if (empty($jsonData)) {
-            $this->response->error(message:'No data provided', responseCode:400);
-        }
-
-        foreach ($jsonData as $field => $value) {
-            $console = $this->consoleModell->set($consoleId, $field, $value);
-            
-            if ($console === false) {
-                $this->response->error(message:'Your request was blocked due to invalid credentials');
-            }
-        }
-
-        $this->response->message(message:'Console updated successfully', responseCode:200);
-
-    }
-
-    public function unlinkConsole($consoleId) {
-        $console = $this->consoleModell->get($consoleId);
-
-        if (empty($console)) {
-            $this->response->error(message:'Console not found', responseCode:404);
-        }
-
-        $this->consoleModell->delete($consoleId);
-        $this->response->message(message:'Console deleted successfully', responseCode:200);
-    }
-
-    public function getAllConsoles() {
-        $orderBy = isset($_GET['orderBy']) ? $_GET['orderBy'] : null;
-        $direction = isset($_GET['desc']) ? $_GET['desc'] : null;
-
-        $console = $this->consoleModell->get(orderBy: $orderBy, desc: $direction);
-
-        if ($console === false) {
-            $this->response->error(message:'Your request was blocked due to invalid credentials');
-        }
-        
-        if (!empty($console)) {
-            $this->response->setHeader(200);
-
-            $response = json_encode($console);
-            echo $response;
+        if (empty($projects)) {
+            $this->response->error(message: 'No projects loaded', responseCode: 500);
             exit();
-
-        } else {
-            $this->response->error(message:'No Consoles found', responseCode:404);
         }
+
+        $this->response->setHeader(200);
+
+        $determinedProjectId = $this->determineProjectId($query, $projects);
+
+        if ($determinedProjectId === 'none') {
+            $this->response->error(message: 'You are not talking about any Project in my Database', responseCode: 404);
+            exit();
+        }
+
+        $answer = $this->answerQuery($query, $determinedProjectId);
+
+        $response = json_encode(['answer' => $answer, 'projectId' => $determinedProjectId]);
+        echo $response;
+        exit();
     }
 
-    public function registerConsole() {
-        $jsonData = json_decode(file_get_contents('php://input'), true);
+    private function determineProjectId($query, $projects)
+    {
+        $sysPrompt = "Determine the project wich is being talked about from the following query. The possible projects are: " . json_encode($projects) . ".\n\n If none of them match, return 'none'. ONLY RETURN THE ID, DO NOT RETURN ANY OTHER TEXT.";
 
-        if (empty($jsonData)) {
-            $this->response->error(message:'No data provided', responseCode:400);
-        }
-        
-        if (!isset($jsonData['name'])) {
-            $this->response->error(message:'Name is required', responseCode:400);
-        }
-
-        $name = $jsonData['name'];
-
-        $result = $this->consoleModell->create($name, true);
-
-        if ($result === false) {
-            $this->response->error(message:'Console could not be created', responseCode:500);
-        } else {
-            $this->response->message(message:'Console created', responseCode:201);
-        }
+        $response = $this->deepseek->callDeepSeek(sysprompt: $sysPrompt, prompt: $query);
+        return $response['choices'][0]['message']['content'];
     }
+
+    private function answerQuery($query, $projectId, $anserSenteceCount = 4)
+    {
+        $projectDescription = $this->projectModell->get($projectId)[0]['long_description'] ?? null;
+
+        if (is_null($projectDescription)) {
+            $this->response->error(message: 'Project not found', responseCode: 500);
+            exit();
+        }
+
+        $sysPrompt = "Answer the following question in about " . $anserSenteceCount . " sentences based on this project description: " . $projectDescription . " YOU CAN MAKE ASSUMPTIONS BUT DONT SOUND UNSURE. DONT USE 'probally' AND SIMILAR WORDS";
+
+        $response = $this->deepseek->callDeepSeek(sysprompt: $sysPrompt, prompt: $query);
+        return $response['choices'][0]['message']['content'];
+    }
+
 }

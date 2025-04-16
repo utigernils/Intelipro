@@ -2,7 +2,7 @@
 RewriteEngine On
 
 # Set the base directory (adjust this to match your project's subdirectory if needed)
-RewriteBase /ExpoPlayAPI/
+RewriteBase /intelipro-1/
 
 # Block access to .ini files
 <FilesMatch "\.ini$">
