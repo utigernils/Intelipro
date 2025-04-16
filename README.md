@@ -1,3 +1,4 @@
+![InteliPro logo](https://github.com/user-attachments/assets/541a2876-b431-4a48-8c65-f9aea8e8dad9)
 # Inteli Pro
 
 **Inteli Pro** is a lightweight PHP-based tool that answers natural language questions about projects stored in a project database. It uses the DeepSeek API to interpret queries and respond with relevant information.
